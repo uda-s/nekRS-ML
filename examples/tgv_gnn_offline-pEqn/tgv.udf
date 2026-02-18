@@ -17,6 +17,92 @@ magSqr(const dlong Ntotal, const dlong offset, @ restrict const dfloat *U, @ res
 
 gnn_t* graph = nullptr;
 
+### cp from src/nrs/tombo.cpp ###
+occa::memory pressureRhs(nrs_t *nrs)
+{
+  auto mesh = nrs->mesh;
+
+  const auto o_lambda0 = [&]() {
+    auto o_lambda0 = platform->deviceMemoryPool.reserve<dfloat>(mesh->Nlocal);
+    platform->linAlg->adyz(mesh->Nlocal, 1.0, nrs->o_rho, o_lambda0);
+    return o_lambda0;
+  }();
+
+  const auto o_stressTerm = [&]() {
+    auto o_curl = platform->deviceMemoryPool.reserve<dfloat>(nrs->NVfields * nrs->fieldOffset);
+
+    nrs->curlKernel(mesh->Nelements, 1, mesh->o_vgeo, mesh->o_D, nrs->fieldOffset, nrs->o_Ue, o_curl);
+
+    oogs::startFinish(o_curl, nrs->NVfields, nrs->fieldOffset, ogsDfloat, ogsAdd, nrs->gsh);
+
+    platform->linAlg->axmyVector(mesh->Nlocal, nrs->fieldOffset, 0, 1.0, nrs->mesh->o_invLMM, o_curl);
+
+    auto o_stressTerm = platform->deviceMemoryPool.reserve<dfloat>(nrs->NVfields * nrs->fieldOffset);
+    nrs->curlKernel(mesh->Nelements, 1, mesh->o_vgeo, mesh->o_D, nrs->fieldOffset, o_curl, o_stressTerm);
+
+    if (platform->options.compareArgs("VELOCITY STRESSFORMULATION", "TRUE")) {
+      nrs->pressureStressKernel(mesh->Nelements,
+                                mesh->o_vgeo,
+                                mesh->o_D,
+                                nrs->fieldOffset,
+                                nrs->o_mue,
+                                nrs->o_Ue,
+                                nrs->o_div,
+                                o_stressTerm);
+    }
+    return o_stressTerm;
+  }();
+
+  const auto o_rhs = [&]() {
+    auto o_gradDiv = platform->deviceMemoryPool.reserve<dfloat>(nrs->NVfields * nrs->fieldOffset);
+    nrs->gradientVolumeKernel(mesh->Nelements,
+                              mesh->o_vgeo,
+                              mesh->o_D,
+                              nrs->fieldOffset,
+                              nrs->o_div,
+                              o_gradDiv);
+
+    auto o_rhs = platform->deviceMemoryPool.reserve<dfloat>(nrs->NVfields * nrs->fieldOffset);
+
+    if (platform->options.compareArgs("PRESSURE VISCOUS TERMS", "TRUE")) {
+      nrs->pressureRhsKernel(mesh->Nlocal,
+                             nrs->fieldOffset,
+                             nrs->o_mue,
+                             o_lambda0,
+                             nrs->o_JwF,
+                             o_stressTerm,
+                             o_gradDiv,
+                             o_rhs);
+    } else {
+      o_rhs.copyFrom(nrs->o_JwF);
+    }
+
+    oogs::startFinish(o_rhs, nrs->NVfields, nrs->fieldOffset, ogsDfloat, ogsAdd, nrs->gsh);
+    platform->linAlg->axmyVector(mesh->Nlocal, nrs->fieldOffset, 0, 1.0, nrs->mesh->o_invLMM, o_rhs);
+
+    return o_rhs;
+  }();
+
+  auto o_pRhs = platform->deviceMemoryPool.reserve<dfloat>(nrs->fieldOffset);
+
+  nrs->wDivergenceVolumeKernel(mesh->Nelements, mesh->o_vgeo, mesh->o_D, nrs->fieldOffset, o_rhs, o_pRhs);
+
+  nrs->pressureAddQtlKernel(mesh->Nlocal, mesh->o_LMM, nrs->g0 * 1 / nrs->dt[0], nrs->o_div, o_pRhs);
+
+  nrs->divergenceSurfaceKernel(mesh->Nelements,
+                               mesh->o_sgeo,
+                               mesh->o_vmapM,
+                               nrs->o_EToB,
+                               nrs->g0 * 1 / nrs->dt[0],
+                               nrs->fieldOffset,
+                               o_rhs,
+                               nrs->o_U,
+                               o_pRhs);
+
+  return o_pRhs;
+}
+###
+
 void printDiagnostics(nrs_t *nrs, double time, int tstep)
 {
   auto mesh = nrs->mesh;
@@ -134,10 +220,26 @@ void UDF_ExecuteStep(double time, int tstep)
   int numSteps = -1;
   platform->options.getArgs("NUMBER TIMESTEPS", numSteps);
   if (numSteps == 0) {
-    dfloat *U = new dfloat[nrs->mesh->dim * nrs->fieldOffset]();
-    dfloat *P = new dfloat[nrs->fieldOffset]();
-    nrs->o_U.copyTo(U, nrs->mesh->dim * nrs->fieldOffset);
-    nrs->o_P.copyTo(P, nrs->fieldOffset);
+#    dfloat *U = new dfloat[nrs->mesh->dim * nrs->fieldOffset]();
+#    dfloat *P = new dfloat[nrs->fieldOffset]();
+#    nrs->o_U.copyTo(U, nrs->mesh->dim * nrs->fieldOffset);
+#    nrs->o_P.copyTo(P, nrs->fieldOffset);
+###
+    dfloat *pRhs = new dfloat[nrs->fieldOffset]();
+    dfloat *gradP = new dfloat[nrs->mesh->dim * nrs->fieldOffset]();
+
+    auto o_pRhs = pressureRhs(nrs);
+    occa::memory o_gradP = platform->deviceMemoryPool.reserve<dfloat>(nrs->mesh->dim * nrs->fieldOffset);
+    nrs->wgradientVolumeKernel(nrs->mesh->Nelements,
+                               nrs->mesh->o_vgeo,
+                               nrs->mesh->o_D,
+                               nrs->fieldOffset,
+                               nrs->o_P,
+                               o_gradP);
+
+    o_pRhs.copyTo(pRhs, nrs->fieldOffset);
+    o_gradP.copyTo(gradP, nrs->mesh->dim * nrs->fieldOffset);
+###
 
     // Get string of the current time, rounded to first decimal place
     dfloat time_rounded = std::round(time * 10.0) / 10.0;
@@ -154,10 +256,19 @@ void UDF_ExecuteStep(double time, int tstep)
     std::string nranks = "_size_" + std::to_string(size);
     std::cout << "n_nodes: " << n_nodes << "\t fieldOffset: " << nrs->fieldOffset << std::endl;
 
-    writeToFileBinaryF(graph->writePath + "/fld_u_time_" + time_rounded_string + irank + nranks + ".bin",
-                U, nrs->fieldOffset, 3);
-    writeToFileBinaryF(graph->writePath + "/fld_p_time_" + time_rounded_string + irank + nranks + ".bin",
-                P, nrs->fieldOffset, 1);
+#    writeToFileBinaryF(graph->writePath + "/fld_u_time_" + time_rounded_string + irank + nranks + ".bin",
+#                U, nrs->fieldOffset, 3);
+#    writeToFileBinaryF(graph->writePath + "/fld_p_time_" + time_rounded_string + irank + nranks + ".bin",
+#                P, nrs->fieldOffset, 1);
+###
+    writeToFileBinaryF(graph->writePath + "/fld_prhs_time_" + time_rounded_string + irank + nranks + ".bin",
+                pRhs, nrs->fieldOffset, 1);
+    writeToFileBinaryF(graph->writePath + "/fld_gradp_time_" + time_rounded_string + irank + nranks + ".bin",
+                gradP, nrs->fieldOffset, 3);
+
+    delete[] pRhs;
+    delete[] gradP;
+###
   }
 
   if (nrs->checkpointStep) {

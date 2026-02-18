@@ -105,8 +105,8 @@ function check_args() {
     echo "NEKRS_HOME does not exist! Check path."
     exit 1
   fi
-  if [ ${MODEL} != "dist-gnn" ] && [ ${MODEL} != "sr-gnn" ]; then
-    echo "Invalid model type! Supported options are dist-gnn and sr-gnn."
+  if [ ${MODEL} != "dist-gnn" ] && [ ${MODEL} != "dist-gnn2" ] && [ ${MODEL} != "sr-gnn" ]; then
+    echo "Invalid model type! Supported options are dist-gnn, dist-gnn2 and sr-gnn."
     exit 1
   fi
   if [ ${DEPLOYMENT} != "clustered" ] && [ ${DEPLOYMENT} != "colocated" ] && [ ${DEPLOYMENT} != "offline" ]; then
