@@ -17,7 +17,7 @@ magSqr(const dlong Ntotal, const dlong offset, @ restrict const dfloat *U, @ res
 
 gnn_t* graph = nullptr;
 
-### cp from src/nrs/tombo.cpp ###
+// edit point1 : cp from src/nrs/tombo.cpp
 occa::memory pressureRhs(nrs_t *nrs)
 {
   auto mesh = nrs->mesh;
@@ -101,7 +101,7 @@ occa::memory pressureRhs(nrs_t *nrs)
 
   return o_pRhs;
 }
-###
+// edit point1 end
 
 void printDiagnostics(nrs_t *nrs, double time, int tstep)
 {
@@ -220,11 +220,12 @@ void UDF_ExecuteStep(double time, int tstep)
   int numSteps = -1;
   platform->options.getArgs("NUMBER TIMESTEPS", numSteps);
   if (numSteps == 0) {
-#    dfloat *U = new dfloat[nrs->mesh->dim * nrs->fieldOffset]();
-#    dfloat *P = new dfloat[nrs->fieldOffset]();
-#    nrs->o_U.copyTo(U, nrs->mesh->dim * nrs->fieldOffset);
-#    nrs->o_P.copyTo(P, nrs->fieldOffset);
-###
+//    dfloat *U = new dfloat[nrs->mesh->dim * nrs->fieldOffset]();
+//    dfloat *P = new dfloat[nrs->fieldOffset]();
+//    nrs->o_U.copyTo(U, nrs->mesh->dim * nrs->fieldOffset);
+//    nrs->o_P.copyTo(P, nrs->fieldOffset);
+
+// edit point2
     dfloat *pRhs = new dfloat[nrs->fieldOffset]();
     dfloat *gradP = new dfloat[nrs->mesh->dim * nrs->fieldOffset]();
 
@@ -239,7 +240,9 @@ void UDF_ExecuteStep(double time, int tstep)
 
     o_pRhs.copyTo(pRhs, nrs->fieldOffset);
     o_gradP.copyTo(gradP, nrs->mesh->dim * nrs->fieldOffset);
-###
+
+// edit point2 end
+
 
     // Get string of the current time, rounded to first decimal place
     dfloat time_rounded = std::round(time * 10.0) / 10.0;
@@ -256,11 +259,13 @@ void UDF_ExecuteStep(double time, int tstep)
     std::string nranks = "_size_" + std::to_string(size);
     std::cout << "n_nodes: " << n_nodes << "\t fieldOffset: " << nrs->fieldOffset << std::endl;
 
-#    writeToFileBinaryF(graph->writePath + "/fld_u_time_" + time_rounded_string + irank + nranks + ".bin",
-#                U, nrs->fieldOffset, 3);
-#    writeToFileBinaryF(graph->writePath + "/fld_p_time_" + time_rounded_string + irank + nranks + ".bin",
-#                P, nrs->fieldOffset, 1);
-###
+//    writeToFileBinaryF(graph->writePath + "/fld_u_time_" + time_rounded_string + irank + nranks + ".bin",
+//                U, nrs->fieldOffset, 3);
+//    writeToFileBinaryF(graph->writePath + "/fld_p_time_" + time_rounded_string + irank + nranks + ".bin",
+//                P, nrs->fieldOffset, 1);
+
+// edit point3
+
     writeToFileBinaryF(graph->writePath + "/fld_prhs_time_" + time_rounded_string + irank + nranks + ".bin",
                 pRhs, nrs->fieldOffset, 1);
     writeToFileBinaryF(graph->writePath + "/fld_gradp_time_" + time_rounded_string + irank + nranks + ".bin",
@@ -268,7 +273,9 @@ void UDF_ExecuteStep(double time, int tstep)
 
     delete[] pRhs;
     delete[] gradP;
-###
+
+// edit point3 end
+
   }
 
   if (nrs->checkpointStep) {
