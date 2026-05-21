@@ -1,0 +1,44 @@
+general:
+  seed: 12
+  device: auto
+  logfreq: 10
+  ckptfreq: 500
+
+data:
+  gnn_outputs_path: /mnt/data1/uda/doe_tgv_gnn_offline/gnn_outputs_poly_3_5-25
+  input_fld_name: prhs
+  output_fld_name: gradp
+  input_fld_dim: 1
+  output_fld_dim: 3
+  sequence_length: 5
+  stride: 1
+  time_min: 5000
+  time_max: 25000
+  val_fraction: 0.1
+  max_samples:
+
+model:
+  name: elementwise_lstm
+  hidden_channels: 64
+  n_lstm_layers: 2
+  n_mlp_hidden_layers: 1
+  dropout: 0.0
+
+learning_rate_schedule:
+  phase1_steps: 500
+  phase2_steps: 2000
+  phase3_steps: 0
+  lr_phase12: 0.00125
+  lr_phase23: 0.0001
+
+optimizer:
+  name: adamw
+  weight_decay: 0.0
+  batch_size: 8192
+  val_batch_size: 8192
+  shuffle: true
+  num_workers: 0
+
+output:
+  output_dir: lstm_outputs/default
+
